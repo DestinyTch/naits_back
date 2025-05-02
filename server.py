@@ -14,6 +14,7 @@ CORS(app)
 def make_db_connection():
     return mysql.connector.connect(
         host="localhost",
+        port="3306",
         user="rockeprt_naitss",
         password="RtjPFFPJwIo.",
         database="rockeprt_naits_users",
