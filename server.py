@@ -14,9 +14,9 @@ CORS(app)
 def make_db_connection():
     return mysql.connector.connect(
         host="localhost",
-        user="NAITS",
-        password="N45192091425Ea@",
-        database="naits_users",
+        user="rockeprt_naitss",
+        password="RtjPFFPJwIo.",
+        database="rockeprt_naits_users",
         autocommit=True
     )
 
