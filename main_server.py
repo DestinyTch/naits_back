@@ -48,10 +48,11 @@ def allowed_file(filename):
 # ======================================
 def make_db_connection():
     return mysql.connector.connect(
-        host="Localhost",
-        user="rockeprt_naits",
-        password="N45192091425Ea@",
-        database="rockeprt_naits_users",
+        host="bkfnzrlkjngko7n2hfff-mysql.services.clever-cloud.com",
+        user="u20ayfsujlwjrm2w",
+        password="D47DQ4b8xAVftpLQA7p",
+        port="21177",
+        database="bkfnzrlkjngko7n2hfff",
         autocommit=True
     )
 
