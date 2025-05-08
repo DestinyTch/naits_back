@@ -4,7 +4,7 @@ import os
 from dateutil.relativedelta import relativedelta
 from flask import Flask, request, jsonify, url_for, render_template,  send_from_directory, abort
 from flask_cors import CORS, cross_origin
-from pymongo import MongoClient
+
 from datetime import datetime, date,timedelta
 import requests
 
