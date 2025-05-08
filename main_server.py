@@ -946,7 +946,7 @@ def api_get_message_count():
     cursor.execute("SELECT COUNT(*) AS c FROM messages")
     count = cursor.fetchone()['c']
     return jsonify({'message_count': count}), 200
-
+    
 
 if __name__ == '__main__':
     app.run()
