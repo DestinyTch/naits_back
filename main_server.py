@@ -4,7 +4,7 @@ import os
 from dateutil.relativedelta import relativedelta
 from flask import Flask, request, jsonify, url_for, render_template,  send_from_directory, abort
 from flask_cors import CORS, cross_origin
-
+from pymongo import MongoClient
 from datetime import datetime, date,timedelta
 import requests
 
@@ -48,10 +48,10 @@ def allowed_file(filename):
 # ======================================
 def make_db_connection():
     return mysql.connector.connect(
-        host="localhost",
-        user="NAITS",
+        host="Localhost",
+        user="rockeprt_naits",
         password="N45192091425Ea@",
-        database="naits_users",
+        database="rockeprt_naits_users",
         autocommit=True
     )
 
@@ -79,6 +79,7 @@ def add_no_cache_headers(response):
     response.headers['Pragma']        = 'no-cache'
     response.headers['Expires']       = '0'
     return response
+
 
 # ======================================
 # User routes
