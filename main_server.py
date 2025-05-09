@@ -820,25 +820,6 @@ def select_materials():
     # no data needed; template JS handles everything
     return render_template('select_materials.html')
 
-@app.route('/', defaults={'page': 'index'})
-@app.route('/<page>')
-def serve_page(page):
-    """
-    Serve <page>.html or fallback to index.html for a SPA.
-    """
-    filename = f"{page}.html"
-    filepath = os.path.join(BASE_DIR, filename)
-
-    if os.path.isfile(filepath):
-        return send_from_directory(BASE_DIR, filename)
-
-    # fallback to your app shell
-    return send_from_directory(BASE_DIR, 'index.html')
-@app.errorhandler(404)
-def page_not_found(error):
-    # BASE_DIR should already be defined as the folder containing your .html files
-    return send_from_directory(BASE_DIR, '404.html'), 404
-# 1) Create message (POST)
 @app.route('/api/messages', methods=['POST'])
 @cross_origin()
 def api_create_message():
@@ -923,6 +904,6 @@ def api_get_message_count():
     return jsonify({'message_count': count}), 200
 
 if __name__ == '__main__':
-    import os
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(port=5000, debug=True)
+
+
