@@ -660,7 +660,6 @@ def delete_ad(ad_id):
     return jsonify({'status':'deleted'}), 200
 
 
-# Admin: Create new resource
 @app.route('/api/resources', methods=['POST'])
 @cross_origin()
 def api_create_resource():
@@ -670,9 +669,10 @@ def api_create_resource():
     course_code   = request.form.get('course_code', '').strip()
     course_title  = request.form.get('course_title', '').strip()
     link_text     = request.form.get('link_text', 'View').strip()
-    file = request.files.get('file')
+    file          = request.files.get('file')
 
-    missing = [f for f in ('resource_type','level','department','course_code','course_title') if not locals()[f]]
+    missing = [f for f in ('resource_type','level','department','course_code','course_title')
+               if not locals()[f]]
     if not file or file.filename == '':
         missing.append('file')
     if missing:
@@ -681,20 +681,24 @@ def api_create_resource():
     if not allowed_file(file.filename):
         return jsonify({'status':'error','message':'Invalid file type'}), 400
 
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     fname = secure_filename(file.filename)
-    save_dir = os.path.join(UPLOAD_DIR, 'resources')
-    os.makedirs(save_dir, exist_ok=True)
-    file.save(os.path.join(save_dir, fname))
+    file_path = os.path.join(UPLOAD_DIR, fname)
+    file.save(file_path)
 
-    cursor = get_cursor()
+    cursor, conn = get_cursor()
     cursor.execute("""
       INSERT INTO resources
         (resource_type, level, department, course_code, course_title, link_text, file_name)
       VALUES (%s,%s,%s,%s,%s,%s,%s)
     """, (resource_type, level, department, course_code, course_title, link_text, fname))
-    return jsonify({'status':'success','id': cursor.lastrowid}), 201
+    conn.commit()   # ← make sure to persist!
+    new_id = cursor.lastrowid
+    cursor.close()
+    conn.close()
 
-# Admin: List / filter resources
+    return jsonify({'status':'success','id': new_id}), 201
+
 @app.route('/api/resources', methods=['GET'])
 @cross_origin()
 def api_list_resources():
@@ -705,22 +709,25 @@ def api_list_resources():
     sql = "SELECT * FROM resources WHERE 1=1"
     params = []
     if resource_type:
-        sql += " AND resource_type=%s";    params.append(resource_type)
+        sql += " AND resource_type=%s"; params.append(resource_type)
     if level:
-        sql += " AND level=%s";            params.append(level)
+        sql += " AND level=%s";         params.append(level)
     if department:
-        sql += " AND department=%s";       params.append(department)
+        sql += " AND department=%s";    params.append(department)
     sql += " ORDER BY uploaded_at DESC"
 
-    cursor = get_cursor()
+    cursor, conn = get_cursor()
     cursor.execute(sql, tuple(params))
     rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
     for r in rows:
-        # now this will resolve to https://naits-back-2.onrender.com/static/uploads/resources/<filename>
-        r['file_url'] = url_for('static', filename=f"uploads/resources/{r['file_name']}", _external=True)
+        r['file_url'] = url_for('static',
+                                filename=f"uploads/resources/{r['file_name']}",
+                                _external=True)
     return jsonify(rows)
 
-# Admin: Update a resource
 @app.route('/api/resources/<int:rid>', methods=['PUT'])
 @cross_origin()
 def api_update_resource(rid):
@@ -740,84 +747,76 @@ def api_update_resource(rid):
 
     vals.append(rid)
     sql = f"UPDATE resources SET {', '.join(fields)} WHERE id=%s"
-    cursor = get_cursor()
+    cursor, conn = get_cursor()
     cursor.execute(sql, tuple(vals))
     if cursor.rowcount == 0:
+        cursor.close(); conn.close()
         return jsonify({'status':'error','message':'Not found'}), 404
+    conn.commit()
+    cursor.close(); conn.close()
     return jsonify({'status':'success'}), 200
 
-# Admin: Delete a resource
 @app.route('/api/resources/<int:rid>', methods=['DELETE'])
 @cross_origin()
 def api_delete_resource(rid):
-    cursor = get_cursor()
+    cursor, conn = get_cursor()
     cursor.execute("DELETE FROM resources WHERE id=%s", (rid,))
     if cursor.rowcount == 0:
+        cursor.close(); conn.close()
         return jsonify({'status':'error','message':'Not found'}), 404
+    conn.commit()
+    cursor.close(); conn.close()
     return jsonify({'status':'success'}), 200
 
-def get_resources_from_db(level, dept):
-    """
-    Query your database or API at /api/resources?level=...&dept=...
-    and return a list of dicts like:
-      {
-        'course_code': 'AMS 101',
-        'course_title': 'Principles of Management',
-        'type': 'LectureNotes',
-        'file_url': '/materials/AMS101.pdf',
-        'link_text': 'View PDF',
-        # For PastQuestions only:
-        # 'files': [{'name':'Q1.pdf','url':'...'}, ...]
-      }
-    """
-    # Example stub:
-    raw = fetch_from_api(f"/resources?level={level}&dept={dept}")
-    result = []
-    for item in raw:
-        entry = {
-            'course_code': item['course_code'],
-            'course_title': item['course_title'],
-            'type': item['resource_type'],
-            'file_url':  item['file_url'],
-            'link_text': item.get('link_text', 'View')
-        }
-        if item['resource_type'] == 'PastQuestions':
-            # assume your API gives a list of files
-            entry['files'] = [{'name': f['name'], 'url': f['url']} for f in item['files']]
-        result.append(entry)
-    return result
+#
+# ——— Public “show materials” ———
+#
+
 @app.route('/materials/<level>/<dept>')
 @cross_origin()
 def show_materials(level, dept):
-    resource_type = request.args.get('type')  # 'LectureNotes' or 'PastQuestions'
+    resource_type = request.args.get('type')
+    if resource_type not in ('LectureNotes', 'PastQuestions'):
+        abort(400, description="Invalid or missing ?type=LectureNotes|PastQuestions")
 
-    # Build title
+    # Build page title
     type_label = 'Lecture Notes' if resource_type == 'LectureNotes' else 'Past Questions'
     title = f"{dept.upper()} {level} - {type_label}"
 
-    # Fetch only matching type
-    raw = fetch_from_api(f"/resources?level={level}&dept={dept}&resource_type={resource_type}")
+    # Query the same DB directly
+    cursor, conn = get_cursor()
+    cursor.execute("""
+       SELECT course_code, course_title, resource_type, link_text, file_name
+       FROM resources
+       WHERE level=%s AND department=%s AND resource_type=%s
+       ORDER BY uploaded_at DESC
+    """, (level, dept, resource_type))
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+
     resources = []
-    for item in raw:
+    for r in rows:
+        file_url = url_for('static',
+                           filename=f"uploads/resources/{r['file_name']}",
+                           _external=True)
         entry = {
-            'course_code': item['course_code'],
-            'course_title': item['course_title'],
-            'type': item['resource_type'],
-            'file_url': item['file_url'],
-            'link_text': item.get('link_text', 'View')
+            'course_code': r['course_code'],
+            'course_title': r['course_title'],
+            'type':        r['resource_type'],
+            'file_url':    file_url,
+            'link_text':   r.get('link_text', 'View')
         }
-        if item['resource_type'] == 'PastQuestions':
-            # Optional: handle multiple files
-            entry['files'] = [{'name': item['course_title'], 'url': item['file_url']}]
+        if r['resource_type'] == 'PastQuestions':
+            entry['files'] = [{'name': r['course_title'], 'url': file_url}]
         resources.append(entry)
 
     return render_template('materials.html',
                            title=title,
                            resources=resources)
+
 @app.route('/select-materials')
 @cross_origin()
 def select_materials():
-    # no data needed; template JS handles everything
     return render_template('select_materials.html')
 
 @app.route('/api/messages', methods=['POST'])
