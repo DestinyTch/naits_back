@@ -1,9 +1,11 @@
 import mysql.connector
+from mysql.connector import Error
 import bcrypt
 import os
 from dateutil.relativedelta import relativedelta
 from flask import Flask, request, jsonify, url_for, render_template,  send_from_directory, abort
 from flask_cors import CORS, cross_origin
+
 
 from datetime import datetime, date,timedelta
 import requests
@@ -13,7 +15,7 @@ from werkzeug.utils import secure_filename
 API_BASE_URL = 'http://localhost:5000/api'
 app = Flask(__name__)
 # Allow React/JS origin for all /api/* endpoints
-global_origin = "http://localhost:3000"
+global_origin = "*"
 CORS(app, resources={r"/api/*": {"origins": global_origin}})
 
     
@@ -48,14 +50,13 @@ def allowed_file(filename):
 # ======================================
 def make_db_connection():
     return mysql.connector.connect(
-    host="bkfnzrlkjngko7n2hfff-mysql.services.clever-cloud.com",
-    user="u20ayfsujlwjrm2w",
-    password="D47DQ4b8xAVftpLQA7p",
-    port=21177,  # note: port should be an integer, not a string
-    database="bkfnzrlkjngko7n2hfff",
-    autocommit=True
-)
-
+        host="sql8.freesqldatabase.com",
+        user="sql8777806",
+        password="469dV5fzXa",
+        port= 3306,
+        database="sql8777806",
+        autocommit=True
+    )
 
 # initial connection
 db = make_db_connection()
@@ -63,25 +64,26 @@ db = make_db_connection()
 def reconnect_db():
     global db
     try:
-        db.close()
-    except:
+        if db.is_connected():
+            db.close()
+    except Exception:
         pass
     db = make_db_connection()
 
 def get_cursor():
+    global db
     try:
         db.ping(reconnect=True, attempts=3, delay=2)
-    except mysql.connector.Error:
+    except Error as e:
+        print(f"[DB] Lost connection: {e}. Reconnecting...")
         reconnect_db()
     return db.cursor(dictionary=True)
-
 @app.after_request
 def add_no_cache_headers(response):
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma']        = 'no-cache'
     response.headers['Expires']       = '0'
     return response
-
 
 # ======================================
 # User routes
@@ -382,10 +384,10 @@ def get_announcements():
     cursor = get_cursor()
     cursor.execute("""
         SELECT id, title, message,
-               DATE_FORMAT(date_posted, '%%M %%d, %%Y') AS date,
-               DATE_FORMAT(date_posted, '%%Y-%%m-%%d %%H:%%i:%%s') AS created_at
+               DATE_FORMAT(created_at, '%%M %%d, %%Y') AS date,
+               DATE_FORMAT(created_at, '%%Y-%%m-%%d %%H:%%i:%%s') AS created_at
         FROM announcements
-        ORDER BY date_posted DESC
+        ORDER BY created_at DESC
     """)
     return jsonify(cursor.fetchall())
 
@@ -404,10 +406,10 @@ def api_list_announcements():
           id,
           title,
           message,
-          DATE_FORMAT(date_posted, '%%M %%d, %%Y') AS date,
+          DATE_FORMAT(created_at, '%%M %%d, %%Y') AS date,
           is_new
         FROM announcements
-        ORDER BY date_posted DESC, id DESC
+        ORDER BY created_at DESC, id DESC
     """
     )
     rows = cursor.fetchall()
@@ -426,7 +428,7 @@ def api_create_announcement():
 
     cursor.execute(
         """
-        INSERT INTO announcements (title, message, date_posted, is_new)
+        INSERT INTO announcements (title, message, created_at, is_new)
         VALUES (%s, %s, NOW(), %s)
         """,
         (title, message, int(is_new))
@@ -441,7 +443,7 @@ def api_get_announcement(ann_id):
         id,
         title,
         message,
-        DATE_FORMAT(date_posted, '%%M %%d, %%Y') AS date,
+        DATE_FORMAT(created_at, '%%M %%d, %%Y') AS date,
         is_new
       FROM announcements
       WHERE id = %s
@@ -502,57 +504,46 @@ def api_update_announcement(ann_id):
 
 
 
-def cleanup_expired_ads():
-    cursor = get_cursor()
-    cursor.execute("DELETE FROM ads WHERE expires_at <= UTC_TIMESTAMP()")
-    return cursor.rowcount
-
 @app.route('/api/ads', methods=['POST'])
 @cross_origin()
-def api_create_ad():
-    title      = request.form.get('title', '').strip()
-    message    = request.form.get('message', '').strip()
-    link_url   = request.form.get('link_url', '').strip()
-    badge      = request.form.get('badge_label', '').strip()
-    price      = request.form.get('price', '').strip()
-    posted_by  = request.form.get('posted_by', '').strip()
-    image_file = request.files.get('image')
-    value_raw  = request.form.get('duration_value', '').strip()
-    unit       = request.form.get('duration_unit', '').strip()
+def create_ad():
+    data  = request.form
+    image = request.files.get('image')
+    required = ['title', 'message', 'link_url', 'price', 'posted_by', 'duration_value', 'duration_unit']
 
-    missing = [f for f in ('title','message','link_url','price','posted_by') if not locals()[f]]
-    if not image_file or image_file.filename == '':
+    missing = [f for f in required if not data.get(f)]
+    if not image or image.filename == '':
         missing.append('image')
-    if not value_raw or not unit:
-        missing.append('duration')
     if missing:
-        return jsonify({'status':'error', 'message': f"Missing: {', '.join(missing)}"}), 400
+        return jsonify({'status':'error', 'message':f"Missing: {', '.join(missing)}"}), 400
 
+    # Duration validation
     try:
-        value = int(value_raw)
+        value = int(data['duration_value'])
         if value < 1:
             raise ValueError
     except ValueError:
-        return jsonify({'status':'error','message':'Invalid duration value; must be a positive integer'}), 400
+        return jsonify({'status':'error','message':'Invalid duration value'}), 400
 
-    if not allowed_file(image_file.filename):
+    if not allowed_file(image.filename):
         return jsonify({'status':'error','message':'Invalid image type'}), 400
 
-    filename = secure_filename(image_file.filename)
+    filename = secure_filename(image.filename)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    image_file.save(os.path.join(UPLOAD_DIR, filename))
+    image.save(os.path.join(UPLOAD_DIR, filename))
 
-    now = datetime.utcnow()
+    now  = datetime.utcnow()
+    unit = data['duration_unit']
     if unit == 'seconds':
-        expires_at = now + timedelta(seconds=value)
+        expires = now + timedelta(seconds=value)
     elif unit == 'minutes':
-        expires_at = now + timedelta(minutes=value)
+        expires = now + timedelta(minutes=value)
     elif unit == 'hours':
-        expires_at = now + timedelta(hours=value)
+        expires = now + timedelta(hours=value)
     elif unit == 'days':
-        expires_at = now + timedelta(days=value)
+        expires = now + timedelta(days=value)
     elif unit == 'years':
-        expires_at = now + relativedelta(years=value)
+        expires = now + relativedelta(years=value)
     else:
         return jsonify({'status':'error','message':'Invalid duration unit'}), 400
 
@@ -563,88 +554,20 @@ def api_create_ad():
            price, posted_by, date_posted, expires_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
-        title,
-        message,
-        filename,
-        link_url,
-        badge,
-        price,
-        posted_by,
-        now,
-        expires_at
+        data['title'], data['message'], filename, data['link_url'],
+        data.get('badge_label',''), data['price'], data['posted_by'],
+        now, expires
     ))
-    new_id = cursor.lastrowid
-    return jsonify({'status':'success','id':new_id}), 201
-
-@app.route('/api/ads/<int:ad_id>', methods=['PUT'])
-@cross_origin()
-def api_update_ad(ad_id):
-    data      = request.get_json() or {}
-    title     = data.get('title', '').strip()
-    message   = data.get('message', '').strip()
-    link_url  = data.get('link_url', '').strip()
-    badge     = data.get('badge_label', '').strip()
-    price     = data.get('price', '').strip()
-    posted_by = data.get('posted_by', '').strip()
-
-    expires_at = None
-    if 'duration_value' in data and 'duration_unit' in data:
-        try:
-            value = int(data['duration_value'])
-            if value < 1:
-                raise ValueError
-        except ValueError:
-            return jsonify({'error':'Invalid duration value'}), 400
-
-        unit = data['duration_unit']
-        now  = datetime.utcnow()
-        if unit == 'seconds':
-            expires_at = now + timedelta(seconds=value)
-        elif unit == 'minutes':
-            expires_at = now + timedelta(minutes=value)
-        elif unit == 'hours':
-            expires_at = now + timedelta(hours=value)
-        elif unit == 'days':
-            expires_at = now + timedelta(days=value)
-        elif unit == 'years':
-            expires_at = now + relativedelta(years=value)
-        else:
-            return jsonify({'error':'Invalid duration unit'}), 400
-
-    if not all([title, message, link_url, price, posted_by]):
-        return jsonify({'error':'Missing required fields'}), 400
-
-    if expires_at:
-        sql = """
-          UPDATE ads
-             SET title=%s, message=%s, link_url=%s, badge_label=%s,
-                 price=%s, posted_by=%s, expires_at=%s
-           WHERE id=%s
-        """
-        params = (title, message, link_url, badge, price, posted_by, expires_at, ad_id)
-    else:
-        sql = """
-          UPDATE ads
-             SET title=%s, message=%s, link_url=%s, badge_label=%s,
-                 price=%s, posted_by=%s
-           WHERE id=%s
-        """
-        params = (title, message, link_url, badge, price, posted_by, ad_id)
-
-    cursor = get_cursor()
-    cursor.execute(sql, params)
-    return jsonify({'status':'updated'}), 200
+    return jsonify({'status':'success','id':cursor.lastrowid}), 201
 
 @app.route('/api/ads', methods=['GET'])
 @cross_origin()
-def api_get_ads():
-    cleanup_expired_ads()
+def list_ads():
     cursor = get_cursor()
     cursor.execute("""
         SELECT id, title, message, image_filename, link_url, badge_label,
                price, posted_by, date_posted, expires_at
           FROM ads
-         WHERE expires_at > UTC_TIMESTAMP()
       ORDER BY date_posted DESC
     """)
     ads = []
@@ -652,14 +575,14 @@ def api_get_ads():
         ad = dict(row)
         ad['date_posted'] = ad['date_posted'].isoformat()
         ad['expires_at']  = ad['expires_at'].isoformat()
-        ad['image_url']   = url_for('static', filename=f'uploads/{ad["image_filename"]}', _external=True)
+        ad['image_url']   = url_for('static',
+            filename=f'uploads/{ad["image_filename"]}', _external=True)
         ads.append(ad)
     return jsonify(ads), 200
 
 @app.route('/api/ads/<int:ad_id>', methods=['GET'])
 @cross_origin()
-def api_get_ad(ad_id):
-    cleanup_expired_ads()
+def get_ad(ad_id):
     cursor = get_cursor()
     cursor.execute("""
         SELECT id, title, message, image_filename, link_url, badge_label,
@@ -673,19 +596,68 @@ def api_get_ad(ad_id):
     ad = dict(row)
     ad['date_posted'] = ad['date_posted'].isoformat()
     ad['expires_at']  = ad['expires_at'].isoformat()
-    ad['image_url']   = url_for('static', filename=f'uploads/{ad["image_filename"]}', _external=True)
+    ad['image_url']   = url_for('static',
+        filename=f'uploads/{ad["image_filename"]}', _external=True)
     return jsonify(ad), 200
+
+@app.route('/api/ads/<int:ad_id>', methods=['PUT'])
+@cross_origin()
+def update_ad(ad_id):
+    data = request.get_json() or {}
+    fields = ['title','message','link_url','badge_label','price','posted_by']
+    if not all(data.get(f,'').strip() for f in fields):
+        return jsonify({'error':'Missing required fields'}), 400
+
+    expires_at = None
+    if 'duration_value' in data and 'duration_unit' in data:
+        try:
+            val = int(data['duration_value'])
+            if val < 1:
+                raise ValueError
+        except ValueError:
+            return jsonify({'error':'Invalid duration value'}), 400
+
+        now = datetime.utcnow()
+        u   = data['duration_unit']
+        if u == 'seconds':
+            expires_at = now + timedelta(seconds=val)
+        elif u == 'minutes':
+            expires_at = now + timedelta(minutes=val)
+        elif u == 'hours':
+            expires_at = now + timedelta(hours=val)
+        elif u == 'days':
+            expires_at = now + timedelta(days=val)
+        elif u == 'years':
+            expires_at = now + relativedelta(years=val)
+        else:
+            return jsonify({'error':'Invalid duration unit'}), 400
+
+    sql = """
+        UPDATE ads
+           SET title=%s, message=%s, link_url=%s, badge_label=%s,
+               price=%s, posted_by=%s""" + \
+          (", expires_at=%s" if expires_at else "") + " WHERE id=%s"
+
+    params = [
+        data['title'], data['message'], data['link_url'],
+        data['badge_label'], data['price'], data['posted_by']
+    ]
+    if expires_at:
+        params.append(expires_at)
+    params.append(ad_id)
+
+    cursor = get_cursor()
+    cursor.execute(sql, tuple(params))
+    return jsonify({'status':'updated'}), 200
 
 @app.route('/api/ads/<int:ad_id>', methods=['DELETE'])
 @cross_origin()
-def api_delete_ad(ad_id):
-    cleanup_expired_ads()
+def delete_ad(ad_id):
     cursor = get_cursor()
     cursor.execute("DELETE FROM ads WHERE id = %s", (ad_id,))
     if cursor.rowcount == 0:
         return jsonify({'status':'error','message':'Ad not found'}), 404
     return jsonify({'status':'deleted'}), 200
-
 
 
 # Admin: Create new resource
@@ -949,9 +921,8 @@ def api_get_message_count():
     cursor.execute("SELECT COUNT(*) AS c FROM messages")
     count = cursor.fetchone()['c']
     return jsonify({'message_count': count}), 200
-    
 
 if __name__ == '__main__':
-    app.run()
+    app.run(port=5000, debug=True)
 
 
