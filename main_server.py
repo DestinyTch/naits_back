@@ -12,7 +12,7 @@ import requests
 
 from werkzeug.utils import secure_filename
 
-API_BASE_URL = 'http://localhost:5000/api'
+API_BASE_URL = 'https://naits-back-2.onrender.com'
 app = Flask(__name__)
 # Allow React/JS origin for all /api/* endpoints
 global_origin = "*"
@@ -716,7 +716,7 @@ def api_list_resources():
     cursor.execute(sql, tuple(params))
     rows = cursor.fetchall()
     for r in rows:
-        # now this will resolve to http://localhost:5000/static/uploads/resources/<filename>
+        # now this will resolve to https://naits-back-2.onrender.com/static/uploads/resources/<filename>
         r['file_url'] = url_for('static', filename=f"uploads/resources/{r['file_name']}", _external=True)
     return jsonify(rows)
 
@@ -824,16 +824,16 @@ def select_materials():
 @app.route('/<page>')
 def serve_page(page):
     """
-    Serve <page>.html for any URL /<page>, hiding the .html extension.
-    /          → index.html
-    /signup    → signup.html
-    /admin     → admin.html
+    Serve <page>.html or fallback to index.html for a SPA.
     """
-    html_path = os.path.join(BASE_DIR, f"{page}.html")
-    if os.path.isfile(html_path):
-        # send the file directly from your project root
-        return send_from_directory(BASE_DIR, f"{page}.html")
- 
+    filename = f"{page}.html"
+    filepath = os.path.join(BASE_DIR, filename)
+
+    if os.path.isfile(filepath):
+        return send_from_directory(BASE_DIR, filename)
+
+    # fallback to your app shell
+    return send_from_directory(BASE_DIR, 'index.html')
 @app.errorhandler(404)
 def page_not_found(error):
     # BASE_DIR should already be defined as the folder containing your .html files
@@ -923,6 +923,6 @@ def api_get_message_count():
     return jsonify({'message_count': count}), 200
 
 if __name__ == '__main__':
-    app.run(port=5000, debug=True)
-
-
+    import os
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
