@@ -51,10 +51,10 @@ def allowed_file(filename):
 def make_db_connection():
     return mysql.connector.connect(
         host="sql8.freesqldatabase.com",
-        user="sql8777806",
-        password="469dV5fzXa",
+        user="sql8779548",
+        password="rLgh6QAfbt",
         port= 3306,
-        database="sql8777806",
+        database="sql8779548",
         autocommit=True
     )
 
